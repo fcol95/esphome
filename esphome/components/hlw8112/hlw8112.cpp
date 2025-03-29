@@ -2,128 +2,169 @@
 #include "esphome/core/log.h"
 #include <cinttypes>
 
+#define WRITE_REG_COMMAND(command) ((command) | 0x80)  // Set the MSB to 1
+#define READ_REG_COMMAND(command) ((command) &0x7F)    // Reset the MSB to 0
+#define LENGTH_OF(x) (sizeof(x) / sizeof(x[0]))
+
 namespace esphome {
 namespace hlw8112 {
 
 static const char *const TAG = "hlw8112";
 
-// https://www.belling.com.cn/media/file_object/bel_product/HLW8112/datasheet/HLW8112_V1.2_cn.pdf
-// (unfortunately chinese, but the protocol can be understood with some translation tool)
-static const uint8_t HLW8112_READ_COMMAND = 0x55;  // 0x5{A4,A3,A2,A1}
-static const uint8_t HLW8112_FULL_PACKET = 0xAA;
-static const uint8_t HLW8112_PACKET_HEADER = 0x55;
+// UART Packet Header
+static const uint8_t HLW8112_PACKET_HEADER = 0xA5;
 
-static const uint8_t HLW8112_WRITE_COMMAND = 0xA5;  // 0xA{A4,A3,A2,A1}
-static const uint8_t HLW8112_REG_IA_FAST_RMS_CTRL = 0x10;
-static const uint8_t HLW8112_REG_IB_FAST_RMS_CTRL = 0x1E;
-static const uint8_t HLW8112_REG_MODE = 0x18;
-static const uint8_t HLW8112_REG_SOFT_RESET = 0x19;
-static const uint8_t HLW8112_REG_USR_WRPROT = 0x1A;
-static const uint8_t HLW8112_REG_TPS_CTRL = 0x1B;
+// Commands Value
+static const uint8_t HLW8112_REG_SPECIAL = 0xEA;            // Special command operations
+static const uint8_t HLW8112_COMMAND_WRITE_EN = 0xE5;       // Special command operations
+static const uint8_t HLW8112_COMMAND_WRITE_PROTECT = 0xDC;  // Special command operations
+static const uint8_t HLW8112_COMMAND_SELECT_CH_A = 0x5A;    // Special command operations
+static const uint8_t HLW8112_COMMAND_SELECT_CH_B = 0xA5;    // Special command operations
+static const uint8_t HLW8112_COMMAND_RESET = 0x96;          // Special command operations
 
-const uint8_t HLW8112_INIT[6][6] = {
-    // Reset to default
-    {HLW8112_WRITE_COMMAND, HLW8112_REG_SOFT_RESET, 0x5A, 0x5A, 0x5A, 0x33},
-    // Enable User Operation Write
-    {HLW8112_WRITE_COMMAND, HLW8112_REG_USR_WRPROT, 0x55, 0x00, 0x00, 0xEB},
-    // 0x0100 = CF_UNABLE energy pulse, AC_FREQ_SEL 50Hz, RMS_UPDATE_SEL 800mS
-    {HLW8112_WRITE_COMMAND, HLW8112_REG_MODE, 0x00, 0x10, 0x00, 0x32},
-    // 0x47FF = Over-current and leakage alarm on, Automatic temperature measurement, Interval 100mS
-    {HLW8112_WRITE_COMMAND, HLW8112_REG_TPS_CTRL, 0xFF, 0x47, 0x00, 0xF9},
-    // 0x181C = Half cycle, Fast RMS threshold 6172
-    {HLW8112_WRITE_COMMAND, HLW8112_REG_IA_FAST_RMS_CTRL, 0x1C, 0x18, 0x00, 0x16},
-    // 0x181C = Half cycle, Fast RMS threshold 6172
-    {HLW8112_WRITE_COMMAND, HLW8112_REG_IB_FAST_RMS_CTRL, 0x1C, 0x18, 0x00, 0x08}};
+// Register addresses
+static const uint8_t HLW8112_REG_SYSCON = 0x00;   // System Control Register
+static const uint8_t HLW8112_REG_EMUCON = 0x01;   // Meter Control Register
+static const uint8_t HLW8112_REG_HFCONST = 0x02;  // Pulse Frequency Register
+static const uint8_t HLW8112_REG_PSTARTA = 0x03;  // Active Start Power Setting for Channel A
+static const uint8_t HLW8112_REG_PSTARTB = 0x04;  // Active Start Power Setting for Channel B
+static const uint8_t HLW8112_REG_PAGAIN = 0x05;   // Channel A Power Gain Calibration Register
+static const uint8_t HLW8112_REG_PBGAIN = 0x06;   // Channel B Power Gain Calibration Register
+static const uint8_t HLW8112_REG_PHASEA = 0x07;   // Channel A Phase Calibration Register
+static const uint8_t HLW8112_REG_PHASEB = 0x08;   // Channel B Phase Calibration Register
+static const uint8_t HLW8112_REG_PAOS = 0x0A;     // Channel A Active Power Offset Calibration
+static const uint8_t HLW8112_REG_PBOS = 0x0B;     // Channel B Active Power Offset Calibration
+static const uint8_t HLW8112_REG_RMSIAOS = 0x0E;  // Current Channel A RMS Offset Compensation
+static const uint8_t HLW8112_REG_RMSIBOS = 0x0F;  // Current Channel B RMS Offset Compensation
+static const uint8_t HLW8112_REG_IBGAIN = 0x10;   // Current Channel B Gain Settings
+static const uint8_t HLW8112_REG_PSGAIN = 0x11;   // Apparent Power Gain Calibration
+static const uint8_t HLW8112_REG_PSOS = 0x12;     // Apparent Power Offset Compensation
+static const uint8_t HLW8112_REG_EMUCON2 = 0x13;  // Meter Control Register 2
+static const uint8_t HLW8112_REG_DCIA = 0x14;     // IA Channel DC Offset Correction Register
+static const uint8_t HLW8112_REG_DCIB = 0x15;     // IB Channel DC Offset Correction Register
+static const uint8_t HLW8112_REG_DCIC = 0x16;     // U Channel DC Offset Correction Register
+static const uint8_t HLW8112_REG_SAGCYC = 0x17;   // Voltage Sag Period Setting
+static const uint8_t HLW8112_REG_SAGLVL = 0x18;   // Voltage Sag Threshold Setting
+static const uint8_t HLW8112_REG_OVLVL = 0x19;    // Voltage Overvoltage Threshold Setting
+static const uint8_t HLW8112_REG_OIALVL = 0x1A;   // Current Channel A Overcurrent Threshold Setting
+static const uint8_t HLW8112_REG_OIBLVL = 0x1B;   // Current Channel B Overcurrent Threshold Setting
+static const uint8_t HLW8112_REG_OPLVL = 0x1C;    // Threshold Setting of Active Power Overload
+static const uint8_t HLW8112_REG_INT = 0x1D;      // INT1/INT2 Interrupt Setting
 
-void HLW8112::loop() {
-  DataPacket buffer;
-  if (!this->available()) {
-    return;
+// Meter Parameter and Status Registers
+static const uint8_t HLW8112_REG_PFCntPA = 0x20;       // Fast Combination Active Pulse Counting of Channel A
+static const uint8_t HLW8112_REG_PFCntPB = 0x21;       // Fast Combination Active Pulse Counting of Channel B
+static const uint8_t HLW8112_REG_ANGLE = 0x22;         // Angle between Current and Voltage (Channel A/B)
+static const uint8_t HLW8112_REG_UFREQ = 0x23;         // Voltage Frequency (L Line)
+static const uint8_t HLW8112_REG_RMSIA = 0x24;         // RMS Current for Channel A (3 bytes)
+static const uint8_t HLW8112_REG_RMSIB = 0x25;         // RMS Current for Channel B (3 bytes)
+static const uint8_t HLW8112_REG_RMSU = 0x26;          // RMS Voltage (3 bytes)
+static const uint8_t HLW8112_REG_POWER_FACTOR = 0x27;  // Power Factor Register (Channel A or B)
+static const uint8_t HLW8112_REG_ENERGY_PA = 0x28;     // Channel A Active Power (reset after reading)
+static const uint8_t HLW8112_REG_ENERGY_PB = 0x29;     // Channel B Active Power (reset after reading)
+static const uint8_t HLW8112_REG_POWER_PA = 0x2C;      // Active Power of Channel A (4 bytes)
+static const uint8_t HLW8112_REG_POWER_PB = 0x2D;      // Active Power of Channel B (4 bytes)
+static const uint8_t HLW8112_REG_POWER_S = 0x2E;       // Apparent Power of Channel A/B (4 bytes)
+static const uint8_t HLW8112_REG_EMU_STATUS = 0x2F;    // Measurement Status and Check Register
+static const uint8_t HLW8112_REG_PEAKIA = 0x30;        // Peak of Current Channel A
+static const uint8_t HLW8112_REG_PEAKIB = 0x31;        // Peak of Current Channel B
+static const uint8_t HLW8112_REG_PEAKU = 0x32;         // Peak Value of Voltage Channel U
+static const uint8_t HLW8112_REG_INSTANTIA = 0x33;     // Instantaneous Value of Current Channel A
+static const uint8_t HLW8112_REG_INSTANTIB = 0x34;     // Instantaneous Value of Current Channel B
+static const uint8_t HLW8112_REG_INSTANTU = 0x35;      // Instantaneous Value of Voltage Channel
+static const uint8_t HLW8112_REG_WAVEIA = 0x36;        // Waveform of Current Channel A
+static const uint8_t HLW8112_REG_WAVEIB = 0x37;        // Waveform of Current Channel B
+static const uint8_t HLW8112_REG_WAVEU = 0x38;         // Waveform of Voltage Channel U
+static const uint8_t HLW8112_REG_INSTANTP = 0x3C;      // Instantaneous Active Power (Channel A or B)
+static const uint8_t HLW8112_REG_INSTANTS = 0x3D;      // Instantaneous Apparent Power (Channel A or B)
+
+// Interrupt Registers
+static const uint8_t HLW8112_REG_IE = 0x40;   // Interrupt Enable Register
+static const uint8_t HLW8112_REG_IF = 0x41;   // Interrupt Flag Register
+static const uint8_t HLW8112_REG_RIF = 0x42;  // Reset Interrupt Status Register
+
+// System Status Registers
+static const uint8_t HLW8112_REG_SYS_STATUS = 0x43;  // System Status Register
+static const uint8_t HLW8112_REG_RDATA = 0x44;       // Data Read by SPI last time
+static const uint8_t HLW8112_REG_WDATA = 0x45;       // Data Written by the last SPI
+
+// Calibration Coefficients
+static const uint8_t HLW8112_REG_RMSIAC = 0x70;     // Current Channel A RMS Conversion Coefficient
+static const uint8_t HLW8112_REG_RMSIBC = 0x71;     // Current Channel B RMS Conversion Coefficient
+static const uint8_t HLW8112_REG_RMSUC = 0x72;      // Voltage Channel RMS Conversion Coefficient
+static const uint8_t HLW8112_REG_POWER_PAC = 0x73;  // Active Power Conversion Coefficient for Channel A
+static const uint8_t HLW8112_REG_POWER_PBC = 0x74;  // Active Power Conversion Coefficient for Channel B
+static const uint8_t HLW8112_REG_POWER_SC = 0x75;   // Apparent Power Conversion Coefficient
+static const uint8_t HLW8112_REG_ENERGY_AC = 0x76;  // Energy Conversion Coefficient for Channel A
+static const uint8_t HLW8112_REG_ENERGY_BC = 0x77;  // Energy Conversion Coefficient for Channel B
+
+// Functions
+uint8_t HLW8112::get_checksum_(const uint8_t command, const uint8_t *data, const size_t len) {
+  uint8_t checksum = HLW8112_PACKET_HEADER;
+  checksum += command;
+  for (size_t i = 0; i < len; i++) {
+    checksum += data[i];
   }
-  if (read_array((uint8_t *) &buffer, sizeof(buffer))) {
-    if (validate_checksum(&buffer)) {
-      received_package_(&buffer);
-    }
-  } else {
-    ESP_LOGW(TAG, "Junk on wire. Throwing away partial message");
-    while (read() >= 0)
-      ;
-  }
+  checksum ^= 0xFF;  // Flip (invert) all bits
+  return checksum;
 }
 
-bool HLW8112::validate_checksum(const DataPacket *data) {
-  uint8_t checksum = HLW8112_READ_COMMAND;
-  // Whole package but checksum
-  for (uint32_t i = 0; i < sizeof(data->raw) - 1; i++) {
-    checksum += data->raw[i];
-  }
-  checksum ^= 0xFF;
-  if (checksum != data->checksum) {
-    ESP_LOGW(TAG, "HLW8112 invalid checksum! 0x%02X != 0x%02X", checksum, data->checksum);
-  }
-  return checksum == data->checksum;
-}
-
-void HLW8112::update() {
+void HLW8112::write_reg_(const uint8_t reg_addr, const uint8_t *data, size_t len) {
+  const uint8_t command = WRITE_REG_COMMAND(reg_addr);
   this->flush();
-  this->write_byte(HLW8112_READ_COMMAND);
-  this->write_byte(HLW8112_FULL_PACKET);
+  this->write_byte(HLW8112_PACKET_HEADER);
+  this->write_byte(command);
+  this->write_array(data, len);
+  this->write_byte(get_checksum_(command, data, len));
+
+  uint8_t readback[len] = {0};
+  this->read_reg_(reg_addr, readback, len);
+  for (size_t i = 0; i < len; i++) {
+    if (readback[i] != data[i]) {
+      ESP_LOGE(TAG, "Failed to write HLW8112 register 0x%02X", reg_addr);
+      this->mark_failed();
+      return;
+    }
+  }
+}
+
+void HLW8112::read_reg_(const uint8_t reg_addr, uint8_t *data, size_t len) {
+  const uint8_t command = READ_REG_COMMAND(reg_addr);
+  this->flush();
+  this->write_byte(HLW8112_PACKET_HEADER);
+  this->write_byte(command);
+  bool success = this->read_array(data, len);
+  if (!success) {
+    ESP_LOGE(TAG, "Failed to read HLW8112 register 0x%02X - read failed!", reg_addr);
+    this->mark_failed();
+  }
+  uint8_t checksum = get_checksum_(command, data, len - 1);  // Ignore last received byte which is checksum
+  if (data[len - 1] != checksum) {
+    ESP_LOGE(TAG, "Failed to read HLW8112 register 0x%02X - wrong checksum!", reg_addr);
+    this->mark_failed();
+  }
+  return;
 }
 
 void HLW8112::setup() {
-  for (auto *i : HLW8112_INIT) {
-    this->write_array(i, 6);
-    delay(1);
-  }
+  // TODO: Reset instruction? 0xEA command with 0x96 data - should take two clock cycles
+  // TODO: Remove write protection? 0xEA command with 0xE5 data (need to reanable it after??)
+  // System Control: Enable Voltage and Current Channels - Enable all channels (default value)
+  const uint8_t init_data_sys_cont[] = {0x0A, 0x04};
+  this->write_reg_(HLW8112_REG_SYSCON, init_data_sys_cont, LENGTH_OF(init_data_sys_cont));
+  // Energy Measure Control: Set measurement mode - Default value
+  const uint8_t init_data_meas_cont[] = {0x00, 0x00};
+  this->write_reg_(HLW8112_REG_EMUCON, init_data_meas_cont, LENGTH_OF(init_data_meas_cont));
   this->flush();
 }
 
-void HLW8112::received_package_(const DataPacket *data) const {
-  // Bad header
-  if (data->frame_header != HLW8112_PACKET_HEADER) {
-    ESP_LOGI(TAG, "Invalid data. Header mismatch: %d", data->frame_header);
+void HLW8112::update() {
+  if (!this->available()) {
+    this->status_set_warning("UART unavailable with HLW8112!");
     return;
   }
-
-  float v_rms = (float) to_uint32_t(data->v_rms) / voltage_reference_;
-  float ia_rms = (float) to_uint32_t(data->ia_rms) / current_reference_;
-  float ib_rms = (float) to_uint32_t(data->ib_rms) / current_reference_;
-  float a_watt = (float) to_int32_t(data->a_watt) / power_reference_;
-  float b_watt = (float) to_int32_t(data->b_watt) / power_reference_;
-  int32_t cfa_cnt = to_int32_t(data->cfa_cnt);
-  int32_t cfb_cnt = to_int32_t(data->cfb_cnt);
-  float a_energy_consumption = (float) cfa_cnt / energy_reference_;
-  float b_energy_consumption = (float) cfb_cnt / energy_reference_;
-  float total_energy_consumption = a_energy_consumption + b_energy_consumption;
-
-  if (voltage_sensor_ != nullptr) {
-    voltage_sensor_->publish_state(v_rms);
-  }
-  if (current_sensor_1_ != nullptr) {
-    current_sensor_1_->publish_state(ia_rms);
-  }
-  if (current_sensor_2_ != nullptr) {
-    current_sensor_2_->publish_state(ib_rms);
-  }
-  if (power_sensor_1_ != nullptr) {
-    power_sensor_1_->publish_state(a_watt);
-  }
-  if (power_sensor_2_ != nullptr) {
-    power_sensor_2_->publish_state(b_watt);
-  }
-  if (energy_sensor_1_ != nullptr) {
-    energy_sensor_1_->publish_state(a_energy_consumption);
-  }
-  if (energy_sensor_2_ != nullptr) {
-    energy_sensor_2_->publish_state(b_energy_consumption);
-  }
-  if (energy_sensor_sum_ != nullptr) {
-    energy_sensor_sum_->publish_state(total_energy_consumption);
-  }
-
-  ESP_LOGV(TAG,
-           "HLW8112: U %fV, I1 %fA, I2 %fA, P1 %fW, P2 %fW, CntA %" PRId32 ", CntB %" PRId32 ", ∫P1 %fkWh, ∫P2 %fkWh",
-           v_rms, ia_rms, ib_rms, a_watt, b_watt, cfa_cnt, cfb_cnt, a_energy_consumption, b_energy_consumption);
+  this->flush();
+  // TODO: Read measurements!!
 }
 
 void HLW8112::dump_config() {  // NOLINT(readability-function-cognitive-complexity)
@@ -137,10 +178,6 @@ void HLW8112::dump_config() {  // NOLINT(readability-function-cognitive-complexi
   LOG_SENSOR("", "Energy 2", this->energy_sensor_2_);
   LOG_SENSOR("", "Energy sum", this->energy_sensor_sum_);
 }
-
-uint32_t HLW8112::to_uint32_t(ube24_t input) { return input.h << 16 | input.m << 8 | input.l; }
-
-int32_t HLW8112::to_int32_t(sbe24_t input) { return input.h << 16 | input.m << 8 | input.l; }
 
 }  // namespace hlw8112
 }  // namespace esphome
