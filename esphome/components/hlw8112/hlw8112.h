@@ -49,6 +49,11 @@ typedef enum {
   HLW8112_RMS_MODE_DC,
 } hlw8112_rms_mode_t;
 
+typedef enum {
+  HLW8112_B_MODE_TEMPERATURE = 0, /* measure temperature inside the chip only */
+  HLW8112_B_MODE_NORMAL,
+} hlw8112_channel_b_mode_t;
+
 typedef struct {
   struct {
     uint16_t A; /* RMS conversion coefficient for current channel A */
@@ -133,6 +138,8 @@ class HLW8112 : public PollingComponent, public uart::UARTDevice {
 
   hlw8112_rms_mode_t rms_mode_;
 
+  hlw8112_channel_b_mode_t channel_b_mode_;
+
   // Params
   hlw8112_resistor_ratio_t resistor_ratio_ = {
       .K1_A = 1.0f,
@@ -164,6 +171,7 @@ class HLW8112 : public PollingComponent, public uart::UARTDevice {
 
   // Control and Config Functions
   void config_channel_enable_(hlw8112_channel_t channel, bool enable);
+  void config_channel_b_mode_(hlw8112_channel_b_mode_t mode);  // Set channel B mode (normal or temperature measurement)
   void select_metrics_channel_(
       hlw8112_channel_t channel);  // Set which channel is used to compute metrics/special measurements (apparent power,
                                    // power factor, phase angle, instantaneous apparent power and active power overload)

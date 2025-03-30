@@ -16,7 +16,7 @@ static const char *const TAG = "hlw8112";
 
 static uint16_t convert_float_to_uint16_centi_(float val) { return (uint16_t) (val * 100); }
 static int32_t convert_24bits_to_int32(const uint8_t buf[3]) {
-#if defined(HLW811X_BIG_ENDIAN)
+#if defined(HLW8112_BIG_ENDIAN)
   return (int32_t) ((buf[2] << 16) | (buf[1] << 8) | buf[0]);
 #else
   return (int32_t) ((buf[0] << 16) | (buf[1] << 8) | buf[2]);
@@ -39,6 +39,7 @@ static uint8_t get_checksum_(const uint8_t command, const uint8_t *data, const s
 void HLW8112::setup() {
   // Reset Chip
   this->reset_chip_();
+  // TODO: Ensure no sleep is needed here?
   // Enable Write Register
   this->write_reg_enable_();
   // Read Coefficients
@@ -51,6 +52,8 @@ void HLW8112::setup() {
   this->select_metrics_channel_(HLW8112_CHANNEL_A);
   // Set RMS Calculation Mode
   this->config_rms_calc_mode(HLW8112_RMS_MODE_AC);
+  // Set Channel B Mode
+  this->config_channel_b_mode_(HLW8112_B_MODE_NORMAL);
   // Enable Channel
   this->config_channel_enable_(HLW8112_CHANNEL_ALL, true);
 
@@ -282,6 +285,24 @@ void HLW8112::read_pga_(void) {
   ESP_LOGV(TAG, "PGA read: A=%d, U=%d, B=%d", this->pga_.A, this->pga_.U, this->pga_.B);
 
   return;
+}
+
+void HLW8112::config_channel_b_mode_(hlw8112_channel_b_mode_t mode) {
+  uint8_t reg_addr = HLW8112_REG_EMUCON2;
+  uint16_t reg;
+  this->read_reg_16_(reg_addr, &reg);
+  if (this->is_failed()) {
+    ESP_LOGE(TAG, "Failed to set HLW8112 channel B mode - Read from register 0x%02X failed!", reg_addr);
+    return;
+  }
+  reg &= ~(0b1 << HLW8112_REG_EMUCON2_CHS_IB);       /* clear CHS_IB bits */
+  reg |= (mode & 0b1 << HLW8112_REG_EMUCON2_CHS_IB); /* set CHS_IB bits */
+
+  this->write_reg_16_(reg_addr, reg);
+  if (this->is_failed()) {
+    ESP_LOGE(TAG, "Failed to set HLW8112 channel B mode - Write to register 0x%02X failed!", reg_addr);
+    return;
+  }
 }
 
 void HLW8112::config_channel_enable_(hlw8112_channel_t channel, bool enable) {
