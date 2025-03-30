@@ -44,9 +44,15 @@ class HLW8112 : public PollingComponent, public uart::UARTDevice {
   sensor::Sensor *energy_sensor_sum_{nullptr};
 
   // Low Level Functions
+  uint8_t get_checksum_(const uint8_t command, const uint8_t *data, const size_t len);
+
   void write_reg_(const uint8_t reg_addr, const uint8_t *data, const size_t len);
   void read_reg_(const uint8_t reg_addr, uint8_t *data, size_t len);
-  uint8_t get_checksum_(const uint8_t command, const uint8_t *data, const size_t len);
+
+  // Special Commands
+  void reset_chip_(void);
+  void write_reg_enable_(void);
+  void write_reg_protect_(void);
   // TODO: Add higher level functions to read voltage, current, power, etc. (to be used by update)
 };
 }  // namespace hlw8112
