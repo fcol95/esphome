@@ -35,11 +35,32 @@ struct hlw8112_coeff {
   uint16_t hfconst; /* pulse frequency constant */
 };
 
-struct hlw811x_resistor_ratio {
+struct hlw8112_resistor_ratio {
   float K1_A; /* current channel A */
   float K1_B; /* current channel B */
   float K2;   /* voltage */
 };
+
+typedef enum {
+  hlw8112_PGA_GAIN_1 = 0,
+  hlw8112_PGA_GAIN_2,
+  hlw8112_PGA_GAIN_4,
+  hlw8112_PGA_GAIN_8,
+  hlw8112_PGA_GAIN_16,
+} hlw8112_pga_gain_t;
+
+typedef struct {
+  hlw8112_pga_gain_t A;
+  hlw8112_pga_gain_t B;
+  hlw8112_pga_gain_t U;
+} hlw8112_pga_t;
+
+typedef enum {
+  HLW8112_CHANNEL_A = 0x01,
+  HLW8112_CHANNEL_B = 0x02,
+  HLW8112_CHANNEL_U = 0x04,
+  HLW8112_CHANNEL_ALL = (HLW8112_CHANNEL_A | HLW8112_CHANNEL_B | HLW8112_CHANNEL_U),
+} hlw8112_channel_t;
 
 class HLW8112 : public PollingComponent, public uart::UARTDevice {
  public:
@@ -55,6 +76,7 @@ class HLW8112 : public PollingComponent, public uart::UARTDevice {
   void set_energy_sensor_1(sensor::Sensor *energy_sensor_1) { energy_sensor_1_ = energy_sensor_1; }
   void set_energy_sensor_2(sensor::Sensor *energy_sensor_2) { energy_sensor_2_ = energy_sensor_2; }
   void set_energy_sensor_sum(sensor::Sensor *energy_sensor_sum) { energy_sensor_sum_ = energy_sensor_sum; }
+  void write_pga(const hlw8112_pga_t *const pga);
 
  protected:
   sensor::Sensor *voltage_sensor_{nullptr};
@@ -70,10 +92,19 @@ class HLW8112 : public PollingComponent, public uart::UARTDevice {
 
   hlw8112_coeff coeffs_;
 
+  hlw8112_pga_t pga_;
+
+  hlw8112_resistor_ratio resistor_ratio_ = {
+      .K1_A = 1.0f,
+      .K1_B = 1.0f,
+      .K2 = 1.0f,
+  };
+
   // Low Level Functions
   uint8_t get_checksum_(const uint8_t command, const uint8_t *data, const size_t len);
 
   void write_reg_(const uint8_t reg_addr, const uint8_t *data, const size_t len);
+  void write_reg_16_(const uint8_t reg_addr, const uint16_t data);
   void read_reg_(const uint8_t reg_addr, uint8_t *data, size_t len);
   void read_reg_16_(const uint8_t reg_addr, uint16_t *data);
 
@@ -84,8 +115,12 @@ class HLW8112 : public PollingComponent, public uart::UARTDevice {
 
   // Calibration Functions
   void read_coeffs_(void);
-  void set_resistor_ratio_(hlw811x_resistor_ratio *ratio);
-  void get_resistor_ratio_(hlw811x_resistor_ratio *ratio);
+  void read_pga_();
+
+  // Control Functions
+  void enable_channel_(hlw8112_channel_t channel);
+  void disable_channel_(hlw8112_channel_t channel);
+
   // TODO: Add higher level functions to read voltage, current, power, etc. (to be used by update)
 };
 }  // namespace hlw8112

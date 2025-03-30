@@ -23,9 +23,9 @@ void HLW8112::setup() {
   this->write_reg_enable_();
   // Read Coefficients
   this->read_coeffs_();
-  // Set Resistor Ratio
+  // Read PGA
+  this->read_pga_();  // TODO: Set PGA?
 
-  // TODO: Remove write protection? 0xEA command with 0xE5 data (need to reanable it after??)
   // System Control: Enable Voltage and Current Channels - Enable all channels (default value)
   const uint8_t init_data_sys_cont[] = {0x0A, 0x04};
   this->write_reg_(HLW8112_REG_SYSCON, init_data_sys_cont, LENGTH_OF(init_data_sys_cont));
@@ -61,6 +61,29 @@ void HLW8112::dump_config() {  // NOLINT(readability-function-cognitive-complexi
   LOG_SENSOR("", "Energy sum", this->energy_sensor_sum_);
 }
 
+void HLW8112::write_pga(const hlw8112_pga_t *const pga) {
+  uint8_t reg_addr = HLW8112_REG_SYSCON;
+  uint16_t reg;
+  this->read_reg_16_(reg_addr, &reg);
+  if (this->is_failed()) {
+    ESP_LOGE(TAG, "Failed to write HLW8112 PGA - Read from register 0x%02X failed!", reg_addr);
+    return;
+  }
+
+  reg &= ~(0x1FF << 0); /* clear PGA bits */
+  reg |= (pga->A << 0) | (pga->U << 3) | (pga->B << 6);
+
+  this->write_reg_16_(reg_addr, reg);
+  if (this->is_failed()) {
+    ESP_LOGE(TAG, "Failed to write HLW8112 PGA - Write to register 0x%02X failed!", reg_addr);
+    return;
+  }
+  memcpy(&this->pga_, pga, sizeof(hlw8112_pga_t));
+  ESP_LOGV(TAG, "PGA set: A=%d, U=%d, B=%d", pga->A, pga->U, pga->B);
+
+  return;
+}
+
 //
 // Private Methods
 //
@@ -92,6 +115,10 @@ void HLW8112::write_reg_(const uint8_t reg_addr, const uint8_t *data, size_t len
       return;
     }
   }
+}
+void HLW8112::write_reg_16_(const uint8_t reg_addr, const uint16_t data) {
+  uint8_t buffer[2] = {(uint8_t) ((data >> 8) & 0xFF), (uint8_t) (data & 0xFF)};
+  this->write_reg_(reg_addr, buffer, 2);
 }
 
 void HLW8112::read_reg_(const uint8_t reg_addr, uint8_t *data, size_t len) {
@@ -173,6 +200,83 @@ void HLW8112::read_coeffs_(void) {
            "Energy_A=%d, Energy_B=%d",
            coeffs.hfconst, coeffs.rms.A, coeffs.rms.B, coeffs.rms.U, coeffs.power.A, coeffs.power.B, coeffs.power.S,
            coeffs.energy.A, coeffs.energy.B);
+
+  return;
+}
+
+void HLW8112::read_pga_(void) {
+  uint8_t reg_addr = HLW8112_REG_SYSCON;
+  uint16_t reg;
+
+  this->read_reg_16_(reg_addr, &reg);
+  if (this->is_failed()) {
+    ESP_LOGE(TAG, "Failed to read HLW8112 PGA - Read from register 0x%02X failed!", reg_addr);
+    return;
+  }
+
+  this->pga_.A = (hlw8112_pga_gain_t) ((reg >> 0) & 0x07);
+  this->pga_.U = (hlw8112_pga_gain_t) ((reg >> 3) & 0x07);
+  this->pga_.B = (hlw8112_pga_gain_t) ((reg >> 6) & 0x07);
+
+  ESP_LOGV(TAG, "PGA read: A=%d, U=%d, B=%d", this->pga_.A, this->pga_.U, this->pga_.B);
+
+  return;
+}
+
+void HLW8112::enable_channel_(hlw8112_channel_t channel) {
+  uint8_t reg_addr = HLW8112_REG_SYSCON;
+  uint16_t reg;
+  this->read_reg_16_(reg_addr, &reg);
+  if (this->is_failed()) {
+    ESP_LOGE(TAG, "Failed to enable HLW8112 channel %d - Read from register 0x%02X failed!", channel, reg_addr);
+    return;
+  }
+
+  if (channel & HLW8112_CHANNEL_A) {
+    reg |= 1 << 9; /* ADC1ON */
+  }
+  if (channel & HLW8112_CHANNEL_B) {
+    reg |= 1 << 10; /* ADC2ON */
+  }
+  if (channel & HLW8112_CHANNEL_U) {
+    reg |= 1 << 11; /* ADC3ON */
+  }
+
+  this->write_reg_16_(reg_addr, reg);
+  if (this->is_failed()) {
+    ESP_LOGE(TAG, "Failed to enable HLW8112 channel %d - Write to register 0x%02X failed!", channel, reg_addr);
+    return;
+  }
+  ESP_LOGV(TAG, "Channel enabled: %d", channel);
+
+  return;
+}
+
+void HLW8112::disable_channel_(hlw8112_channel_t channel) {
+  uint8_t reg_addr = HLW8112_REG_SYSCON;
+  uint16_t reg;
+  this->read_reg_16_(reg_addr, &reg);
+  if (this->is_failed()) {
+    ESP_LOGE(TAG, "Failed to disable HLW8112 channel %d - Read from register 0x%02X failed!", channel, reg_addr);
+    return;
+  }
+
+  if (channel & HLW8112_CHANNEL_A) {
+    reg &= ~(1 << 9); /* ADC1ON */
+  }
+  if (channel & HLW8112_CHANNEL_B) {
+    reg &= ~(1 << 10); /* ADC2ON */
+  }
+  if (channel & HLW8112_CHANNEL_U) {
+    reg &= ~(1 << 11); /* ADC3ON */
+  }
+
+  this->write_reg_16_(reg_addr, reg);
+  if (this->is_failed()) {
+    ESP_LOGE(TAG, "Failed to disable HLW8112 channel %d - Write to register 0x%02X failed!", channel, reg_addr);
+    return;
+  }
+  ESP_LOGV(TAG, "Channel disable: %d", channel);
 
   return;
 }
