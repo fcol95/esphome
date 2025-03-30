@@ -76,14 +76,15 @@ static const uint8_t HLW8112_REG_RDATA = 0x44;       // Data Read by SPI last ti
 static const uint8_t HLW8112_REG_WDATA = 0x45;       // Data Written by the last SPI
 
 // Calibration Coefficients
-static const uint8_t HLW8112_REG_RMSIAC = 0x70;     // Current Channel A RMS Conversion Coefficient
-static const uint8_t HLW8112_REG_RMSIBC = 0x71;     // Current Channel B RMS Conversion Coefficient
-static const uint8_t HLW8112_REG_RMSUC = 0x72;      // Voltage Channel RMS Conversion Coefficient
-static const uint8_t HLW8112_REG_POWER_PAC = 0x73;  // Active Power Conversion Coefficient for Channel A
-static const uint8_t HLW8112_REG_POWER_PBC = 0x74;  // Active Power Conversion Coefficient for Channel B
-static const uint8_t HLW8112_REG_POWER_SC = 0x75;   // Apparent Power Conversion Coefficient
-static const uint8_t HLW8112_REG_ENERGY_AC = 0x76;  // Energy Conversion Coefficient for Channel A
-static const uint8_t HLW8112_REG_ENERGY_BC = 0x77;  // Energy Conversion Coefficient for Channel B
+static const uint8_t HLW8112_REG_RMSIAC = 0x70;       // Current Channel A RMS Conversion Coefficient
+static const uint8_t HLW8112_REG_RMSIBC = 0x71;       // Current Channel B RMS Conversion Coefficient
+static const uint8_t HLW8112_REG_RMSUC = 0x72;        // Voltage Channel RMS Conversion Coefficient
+static const uint8_t HLW8112_REG_POWER_PAC = 0x73;    // Active Power Conversion Coefficient for Channel A
+static const uint8_t HLW8112_REG_POWER_PBC = 0x74;    // Active Power Conversion Coefficient for Channel B
+static const uint8_t HLW8112_REG_POWER_SC = 0x75;     // Apparent Power Conversion Coefficient
+static const uint8_t HLW8112_REG_ENERGY_AC = 0x76;    // Energy Conversion Coefficient for Channel A
+static const uint8_t HLW8112_REG_ENERGY_BC = 0x77;    // Energy Conversion Coefficient for Channel B
+static const uint8_t HLW8112_REG_COEFF_CHKSM = 0x6F;  // Coefficients Checksum Register
 
 // Special Register Commands Value
 static const uint8_t HLW8112_COMMAND_WRITE_EN = 0xE5;       // Special command operations

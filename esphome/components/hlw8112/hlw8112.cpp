@@ -19,6 +19,12 @@ static const char *const TAG = "hlw8112";
 void HLW8112::setup() {
   // Reset Chip
   this->reset_chip_();
+  // Enable Write Register
+  this->write_reg_enable_();
+  // Read Coefficients
+  this->read_coeffs_();
+  // Set Resistor Ratio
+
   // TODO: Remove write protection? 0xEA command with 0xE5 data (need to reanable it after??)
   // System Control: Enable Voltage and Current Channels - Enable all channels (default value)
   const uint8_t init_data_sys_cont[] = {0x0A, 0x04};
@@ -26,6 +32,7 @@ void HLW8112::setup() {
   // Energy Measure Control: Set measurement mode - Default value
   const uint8_t init_data_meas_cont[] = {0x00, 0x00};
   this->write_reg_(HLW8112_REG_EMUCON, init_data_meas_cont, LENGTH_OF(init_data_meas_cont));
+
   this->flush();
 }
 
@@ -40,6 +47,10 @@ void HLW8112::update() {
 
 void HLW8112::dump_config() {  // NOLINT(readability-function-cognitive-complexity)
   ESP_LOGCONFIG(TAG, "HLW8112:");
+  if (this->is_failed()) {
+    ESP_LOGE(TAG, "Communication with ATM90E32 failed!");
+  }
+  LOG_UPDATE_INTERVAL(this);
   LOG_SENSOR("", "Voltage", this->voltage_sensor_);
   LOG_SENSOR("", "Current 1", this->current_sensor_1_);
   LOG_SENSOR("", "Current 2", this->current_sensor_2_);
@@ -53,6 +64,7 @@ void HLW8112::dump_config() {  // NOLINT(readability-function-cognitive-complexi
 //
 // Private Methods
 //
+// Low Level Functions
 uint8_t HLW8112::get_checksum_(const uint8_t command, const uint8_t *data, const size_t len) {
   uint8_t checksum = HLW8112_PACKET_HEADER;
   checksum += command;
@@ -91,6 +103,7 @@ void HLW8112::read_reg_(const uint8_t reg_addr, uint8_t *data, size_t len) {
   if (!success) {
     ESP_LOGE(TAG, "Failed to read HLW8112 register 0x%02X - read failed!", reg_addr);
     this->mark_failed();
+    return;
   }
   uint8_t checksum = get_checksum_(command, data, len - 1);  // Ignore last received byte which is checksum
   if (data[len - 1] != checksum) {
@@ -99,6 +112,13 @@ void HLW8112::read_reg_(const uint8_t reg_addr, uint8_t *data, size_t len) {
   }
   return;
 }
+void HLW8112::read_reg_16_(const uint8_t reg_addr, uint16_t *data) {
+  uint8_t readback[2] = {0};
+  this->read_reg_(reg_addr, readback, 2);
+  *data = (readback[0] << 8) | readback[1];
+}
+
+// Special Commands
 void HLW8112::reset_chip_(void) {
   uint8_t special_reg_value = HLW8112_COMMAND_RESET;
   this->write_reg_(HLW8112_REG_SPECIAL, &special_reg_value, 1);
@@ -112,6 +132,49 @@ void HLW8112::write_reg_enable_(void) {
 void HLW8112::write_reg_protect_(void) {
   uint8_t special_reg_value = HLW8112_COMMAND_WRITE_PROTECT;
   this->write_reg_(HLW8112_REG_SPECIAL, &special_reg_value, 1);
+}
+void HLW8112::read_coeffs_(void) {
+  uint16_t coeffs_checksum = {0};
+  hlw8112_coeff coeffs;
+
+  this->read_reg_16_(HLW8112_REG_HFCONST, &coeffs.hfconst);  // Not really a coefficient, but still needed
+  this->read_reg_16_(HLW8112_REG_RMSIAC, &coeffs.rms.A);
+  this->read_reg_16_(HLW8112_REG_RMSIBC, &coeffs.rms.B);
+  this->read_reg_16_(HLW8112_REG_RMSUC, &coeffs.rms.U);
+  this->read_reg_16_(HLW8112_REG_POWER_PAC, &coeffs.power.A);
+  this->read_reg_16_(HLW8112_REG_POWER_PBC, &coeffs.power.B);
+  this->read_reg_16_(HLW8112_REG_POWER_SC, &coeffs.power.S);
+  this->read_reg_16_(HLW8112_REG_ENERGY_AC, &coeffs.energy.A);
+  this->read_reg_16_(HLW8112_REG_ENERGY_BC, &coeffs.energy.B);
+  this->read_reg_16_(HLW8112_REG_COEFF_CHKSM, &coeffs_checksum);
+
+  if (this->is_failed()) {
+    ESP_LOGE(TAG, "Failed to read HLW8112 coefficients!");
+    return;
+  }
+
+  const uint16_t coeffs_checksum_calc =
+      (uint16_t) ~(0xFFFFu + coeffs.rms.A + coeffs.rms.B + coeffs.rms.U + coeffs.power.A + coeffs.power.B +
+                   coeffs.power.S + coeffs.energy.A + coeffs.energy.B);
+
+  if (coeffs_checksum != coeffs_checksum_calc) {
+    this->mark_failed();
+    ESP_LOGE(TAG, "HLW8112 coefficients checksum mismatch! Expected: 0x%04X, got: 0x%04X", coeffs_checksum_calc,
+             coeffs_checksum);
+    return;
+  }
+
+  memcpy(&this->coeffs_, &coeffs, sizeof(hlw8112_coeff));
+
+  ESP_LOGV(TAG,
+           "Coefficients: HFConst=%d, "
+           "RMS_A=%d, RMS_B=%d, RMS_U=%d, "
+           "Power_A=%d, Power_B=%d, Power_S=%d, "
+           "Energy_A=%d, Energy_B=%d",
+           coeffs.hfconst, coeffs.rms.A, coeffs.rms.B, coeffs.rms.U, coeffs.power.A, coeffs.power.B, coeffs.power.S,
+           coeffs.energy.A, coeffs.energy.B);
+
+  return;
 }
 
 }  // namespace hlw8112
