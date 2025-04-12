@@ -57,13 +57,6 @@ void HLW8112::setup() {
   // Enable Channel
   this->config_channel_enable_(HLW8112_CHANNEL_ALL, true);
 
-  // System Control: Enable Voltage and Current Channels - Enable all channels (default value)
-  const uint8_t init_data_sys_cont[] = {0x0A, 0x04};
-  this->write_reg_(HLW8112_REG_SYSCON, init_data_sys_cont, LENGTH_OF(init_data_sys_cont));
-  // Energy Measure Control: Set measurement mode - Default value
-  const uint8_t init_data_meas_cont[] = {0x00, 0x00};
-  this->write_reg_(HLW8112_REG_EMUCON, init_data_meas_cont, LENGTH_OF(init_data_meas_cont));
-
   this->flush();
 }
 
@@ -79,7 +72,7 @@ void HLW8112::update() {
 void HLW8112::dump_config() {  // NOLINT(readability-function-cognitive-complexity)
   ESP_LOGCONFIG(TAG, "HLW8112:");
   if (this->is_failed()) {
-    ESP_LOGE(TAG, "Communication with ATM90E32 failed!");
+    ESP_LOGE(TAG, "Communication with HLW8112 failed!");
   }
   LOG_UPDATE_INTERVAL(this);
   // TODO: Add actual config values, not just sensors
