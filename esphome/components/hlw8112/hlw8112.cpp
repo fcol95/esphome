@@ -190,7 +190,8 @@ void HLW8112::read_reg_(const uint8_t reg_addr, uint8_t *data, size_t len) {
   }
   uint8_t checksum = get_checksum_(command, data, len - 1);  // Ignore last received byte which is checksum
   if (data[len - 1] != checksum) {
-    ESP_LOGV(TAG, "Failed to read HLW8112 register 0x%02X - wrong checksum!", reg_addr);
+    ESP_LOGV(TAG, "Failed to read HLW8112 register 0x%02X - wrong checksum! (got 0x%02x, expected 0x%02x!)", reg_addr,
+             data[len - 1], checksum);
     this->mark_failed();
   }
   return;
