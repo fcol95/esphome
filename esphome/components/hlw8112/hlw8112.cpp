@@ -154,18 +154,23 @@ void HLW8112::config_rms_calc_mode(const hlw8112_rms_mode_t mode) {
 // Low Level Functions
 
 void HLW8112::write_reg_(const uint8_t reg_addr, const uint8_t *data, size_t len) {
+  uint8_t buffer_len = len + 3;  // 2 bytes for header and command, 1 byte for checksum
   const uint8_t command = WRITE_REG_COMMAND(reg_addr);
+  uint8_t checksum = get_checksum_(command, data, len);
+  uint8_t write_buffer[buffer_len] = {};
+  write_buffer[0] = HLW8112_PACKET_HEADER;
+  write_buffer[1] = command;
+  memcpy(&write_buffer[2], data, len);
+  write_buffer[buffer_len - 1] = checksum;
   this->flush();
-  this->write_byte(HLW8112_PACKET_HEADER);
-  this->write_byte(command);
-  this->write_array(data, len);
-  this->write_byte(get_checksum_(command, data, len));
+  this->write_array(write_buffer, buffer_len);
 
   uint8_t readback[len] = {0};
   this->read_reg_(reg_addr, readback, len);
   for (size_t i = 0; i < len; i++) {
     if (readback[i] != data[i]) {
-      ESP_LOGV(TAG, "Failed to write HLW8112 register 0x%02X", reg_addr);
+      ESP_LOGV(TAG, "Failed to write HLW8112 register 0x%02X! Sent 0x%02X and readback 0x%02X...", reg_addr, data[i],
+               readback[i]);
       this->mark_failed();
       return;
     }
@@ -178,22 +183,25 @@ void HLW8112::write_reg_16_(const uint8_t reg_addr, const uint16_t data) {
 }
 
 void HLW8112::read_reg_(const uint8_t reg_addr, uint8_t *data, size_t len) {
+  uint8_t buffer_len = len + 1;  // +1 for checksum
+  uint8_t read_buffer[buffer_len] = {0};
   const uint8_t command = READ_REG_COMMAND(reg_addr);
+  uint8_t write_buffer[2] = {HLW8112_PACKET_HEADER, command};  // 1 byte for header, 1 byte for command
   this->flush();
-  this->write_byte(HLW8112_PACKET_HEADER);
-  this->write_byte(command);
-  bool success = this->read_array(data, len);
+  this->write_array(write_buffer, 2);
+  bool success = this->read_array(read_buffer, buffer_len);
   if (!success) {
     ESP_LOGV(TAG, "Failed to read HLW8112 register 0x%02X - read array failed!", reg_addr);
     this->mark_failed();
     return;
   }
-  uint8_t checksum = get_checksum_(command, data, len - 1);  // Ignore last received byte which is checksum
-  if (data[len - 1] != checksum) {
+  uint8_t checksum = get_checksum_(command, read_buffer, len);
+  if (read_buffer[len - 1] != checksum) {
     ESP_LOGV(TAG, "Failed to read HLW8112 register 0x%02X - wrong checksum! (got 0x%02x, expected 0x%02x!)", reg_addr,
              data[len - 1], checksum);
     this->mark_failed();
   }
+  memcpy(data, read_buffer, len);
   return;
 }
 
